@@ -1,0 +1,123 @@
+# ---------------------------------------------------------------------------
+# Document Insights API - local development stack
+#
+# Spins up the FastAPI service, Celery worker, MongoDB and
+# Redis with a single command:
+#
+#     cp .env.example .env        # (optional) tweak config
+#     docker compose up --build
+#
+# Services:
+#   - api      FastAPI HTTP server (port 8000)
+#   - worker   Celery worker — consumes `documents` queue via Redis
+#   - mongo    MongoDB database (persistent volume)
+#   - redis    Redis broker / cache / rate-limit store (persistent volume)
+# ---------------------------------------------------------------------------
+
+name: document-insights
+
+services:
+  # -------------------------------------------------------------------------
+  # FastAPI HTTP API
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: document-insights:latest
+    container_name: di-api
+    command: ["uv", "run", "main.py"]
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - appnet
+
+  # -------------------------------------------------------------------------
+  # Celery Worker — consumes `documents` queue via Redis broker
+  # Processes queued documents (simulated 10-30s work + 10% failure rate)
+  # Same image as API; overridden command runs Celery worker
+  # -------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: document-insights:latest
+    container_name: di-worker
+    command: ["uv", "run", "celery", "-A", "workers.celery_app", "worker", "--loglevel=info"]
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=development
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    networks:
+      - appnet
+
+  # -------------------------------------------------------------------------
+  # MongoDB - persistent data volume on ./data/mongo
+  # -------------------------------------------------------------------------
+  mongo:
+    image: mongo:7
+    container_name: di-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - appnet
+
+  # -------------------------------------------------------------------------
+  # Redis - cache + per-user rate-limit store
+  # -------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: di-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - appnet
+
+volumes:
+  mongo-data:
+  redis-data:
+
+networks:
+  appnet:
+    driver: bridge

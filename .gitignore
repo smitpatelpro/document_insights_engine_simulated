@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Package manager
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Local env / secrets
+.env
+
+# Docker / compose local state
+docker-compose.override.yml
+
+# Data volumes (persisted MongoDB/Redis)
+data/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
